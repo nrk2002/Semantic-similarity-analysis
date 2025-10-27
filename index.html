@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Similarity Analyzer</title>
+    <!-- Chart.js for training history visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        .container {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 0;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        .results {
+            margin-top: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .tab-buttons {
+            display: flex;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .tab-button {
+            margin-right: 0;
+            background-color: #ddd;
+            color: #333;
+        }
+        .tab-button.active {
+            background-color: #3498db;
+            color: white;
+        }
+        .similarity-high {
+            color: #27ae60;
+            font-weight: bold;
+        }
+        .similarity-medium {
+            color: #f39c12;
+            font-weight: bold;
+        }
+        .similarity-low {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .hidden {
+            display: none;
+        }
+        .metric-card {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        .metric-good {
+            color: #27ae60;
+        }
+        .metric-medium {
+            color: #f39c12;
+        }
+        .metric-bad {
+            color: #e74c3c;
+        }
+        .progress-container {
+            width: 100%;
+            background-color: #ecf0f1;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .progress-bar {
+            height: 20px;
+            border-radius: 5px;
+            background-color: #3498db;
+            text-align: center;
+            color: white;
+            line-height: 20px;
+        }
+        .model-info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .model-info-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top: 4px solid #3498db;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <h1>PDF Similarity Analyzer</h1>
+    
+    <div class="container">
+        <button id="showPerformanceBtn">Show Model Performance</button>
+        <div id="performanceInfo" class="hidden">
+            <h2>Model Performance Metrics</h2>
+            <div id="metricsContainer" class="loading">
+                <div class="spinner"></div>
+                <p>Loading performance metrics...</p>
+            </div>
+            <h2>ROC Curve</h2>
+            <img src="{{ url_for('static', filename='skipgram_roc_curve.png') }}" alt="ROC Curve" style="max-width: 100%; height: auto;">
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Upload PDF to Compare</h2>
+        <div class="upload-area">
+            <p>Drag and drop your PDF file here or click to select</p>
+            <input type="file" id="pdfUpload" accept=".pdf">
+            <p><small>Only PDF files are accepted</small></p>
+        </div>
+        
+        <div id="resultsArea" class="hidden">
+            <h2>Comparison Results</h2>
+            <div class="tab-buttons">
+                <button class="tab-button active" data-tab="basic">Basic</button>
+                <button class="tab-button" data-tab="cnn">CNN</button>
+                <button class="tab-button" data-tab="lstm">LSTM</button>
+                <button class="tab-button" data-tab="hybrid">Hybrid</button>
+            </div>
+            
+            <div id="basicResults" class="results">
+                <h3>Basic Embedding Comparison</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Training Document</th>
+                            <th>Similarity Score</th>
+                            <th>Classification</th>
+                        </tr>
+                    </thead>
+                    <tbody id="basicTableBody"></tbody>
+                </table>
+            </div>
+            
+            <div id="cnnResults" class="results hidden">
+                <h3>CNN Comparison</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Training Document</th>
+                            <th>Similarity Score</th>
+                            <th>Classification</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cnnTableBody"></tbody>
+                </table>
+            </div>
+            
+            <div id="lstmResults" class="results hidden">
+                <h3>LSTM Comparison</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Training Document</th>
+                            <th>Similarity Score</th>
+                            <th>Classification</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lstmTableBody"></tbody>
+                </table>
+            </div>
+            
+            <div id="hybridResults" class="results hidden">
+                <h3>Hybrid Comparison</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Training Document</th>
+                            <th>Similarity Score</th>
+                            <th>Classification</th>
+                        </tr>
+                    </thead>
+                    <tbody id="hybridTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>        
+       document.addEventListener('DOMContentLoaded', function () {
+            // Show/hide performance info
+            document.getElementById('showPerformanceBtn').addEventListener('click', function () {
+                const perfInfo = document.getElementById('performanceInfo');
+                perfInfo.classList.toggle('hidden');
+                this.textContent = perfInfo.classList.contains('hidden') ?
+                    'Show Model Performance' : 'Hide Model Performance';
+
+                if (!perfInfo.classList.contains('hidden')) {
+                    loadPerformanceMetrics();
+                }
+            });
+
+            // Handle file upload
+            document.getElementById('pdfUpload').addEventListener('change', function (e) {
+                if (e.target.files.length > 0) {
+                    const file = e.target.files[0];
+                    if (file.type === 'application/pdf') {
+                        uploadAndAnalyze(file);
+                    } else {
+                        alert('Please upload a PDF file');
+                    }
+                }
+            });
+
+            // Tab switching
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.addEventListener('click', function () {
+                    document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+                    this.classList.add('active');
+
+                    document.querySelectorAll('.results').forEach(result => result.classList.add('hidden'));
+                    const tabName = this.getAttribute('data-tab');
+                    document.getElementById(`${tabName}Results`).classList.remove('hidden');
+                });
+            });
+
+            // Drag and drop functionality
+            const uploadArea = document.querySelector('.upload-area');
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.style.borderColor = '#3498db';
+                uploadArea.style.backgroundColor = '#ecf0f1';
+            });
+
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.style.borderColor = '#ccc';
+                uploadArea.style.backgroundColor = '';
+            });
+
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.style.borderColor = '#ccc';
+                uploadArea.style.backgroundColor = '';
+
+                if (e.dataTransfer.files.length > 0) {
+                    const file = e.dataTransfer.files[0];
+                    if (file.type === 'application/pdf') {
+                        document.getElementById('pdfUpload').files = e.dataTransfer.files;
+                        uploadAndAnalyze(file);
+                    } else {
+                        alert('Please upload a PDF file');
+                    }
+                }
+            });
+        });
+
+        function uploadAndAnalyze(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            document.getElementById('resultsArea').classList.add('hidden');
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('resultsArea').classList.remove('hidden');
+                    displayResults(data.simple, 'basicTableBody');
+                    displayResults(data.cnn, 'cnnTableBody');
+                    displayResults(data.lstm, 'lstmTableBody');
+                    displayResults(data.hybrid, 'hybridTableBody');
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while processing the file');
+                });
+        }
+
+        function displayResults(results, tableId) {
+            const tableBody = document.getElementById(tableId);
+            tableBody.innerHTML = '';
+
+            results.forEach(result => {
+                const row = document.createElement('tr');
+
+                const nameCell = document.createElement('td');
+                nameCell.textContent = result.train_doc;
+                row.appendChild(nameCell);
+
+                const scoreCell = document.createElement('td');
+                scoreCell.textContent = result.score.toFixed(4);
+                row.appendChild(scoreCell);
+
+                const classCell = document.createElement('td');
+                let className = '';
+                let classText = '';
+
+                if (result.score >= 0.8) {
+                    className = 'similarity-high';
+                    classText = 'Most Similar';
+                } else if (result.score >= 0.5) {
+                    className = 'similarity-medium';
+                    classText = 'Moderate Similar';
+                } else if (result.score >= 0.3) {
+                    className = 'similarity-low';
+                    classText = 'Less Similar';
+                } else {
+                    className = 'similarity-none';
+                    classText = 'Not Similar';
+                }
+
+                classCell.textContent = classText;
+                classCell.className = className;
+                row.appendChild(classCell);
+
+                tableBody.appendChild(row);
+            });
+        }
+
+        function loadPerformanceMetrics() {
+            const metricsContainer = document.getElementById('metricsContainer');
+            
+            metricsContainer.innerHTML = `
+                <div class="spinner"></div>
+                <p>Loading performance metrics...</p>
+            `;
+
+            fetch('/get_model_metrics')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        metricsContainer.innerHTML = `<div class="metric-card"><p>${data.error}</p></div>`;
+                        return;
+                    }
+
+                    let html = `
+                        <div class="model-info-grid">
+                            <div class="model-info-card">
+                                <h3>Model Information</h3>
+                                <p><strong>Embedding Dimension:</strong> ${data.model_info.embedding_dim}</p>
+                                <p><strong>Vocabulary Size:</strong> ${data.model_info.vocab_size}</p>
+                            </div>
+
+                            <div class="model-info-card">
+                                <h3>Training Accuracy</h3>
+                                <div class="metric-value metric-good">${(data.performance.final_train_accuracy * 100).toFixed(2)}%</div>
+                                <div class="progress-container">
+                                    <div class="progress-bar" style="width: ${data.performance.final_train_accuracy * 100}%">
+                                        ${(data.performance.final_train_accuracy * 100).toFixed(1)}%
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="model-info-card">
+                                <h3>Validation Accuracy</h3>
+                                <div class="metric-value ${data.performance.final_val_accuracy > 0.7 ? 'metric-good' :
+                                    data.performance.final_val_accuracy > 0.5 ? 'metric-medium' : 'metric-bad'}">
+                                    ${(data.performance.final_val_accuracy * 100).toFixed(2)}%
+                                </div>
+                                <div class="progress-container">
+                                    <div class="progress-bar" style="width: ${data.performance.final_val_accuracy * 100}%">
+                                        ${(data.performance.final_val_accuracy * 100).toFixed(1)}%
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="model-info-card">
+                                <h3>ROC AUC Score</h3>
+                                <div class="metric-value ${data.performance.roc_auc > 0.8 ? 'metric-good' :
+                                    data.performance.roc_auc > 0.6 ? 'metric-medium' : 'metric-bad'}">
+                                    ${data.performance.roc_auc.toFixed(4)}
+                                </div>
+                                <p>AUC > 0.8 is excellent</p>
+                            </div>
+                        </div>
+
+                        <div class="model-info-grid">
+                            <div class="model-info-card">
+                                <h3>Training Loss</h3>
+                                <div class="metric-value ${data.performance.final_train_loss < 0.4 ? 'metric-good' :
+                                    data.performance.final_train_loss < 0.6 ? 'metric-medium' : 'metric-bad'}">
+                                    ${data.performance.final_train_loss.toFixed(4)}
+                                </div>
+                                <p>Lower is better</p>
+                            </div>
+
+                            <div class="model-info-card">
+                                <h3>Validation Loss</h3>
+                                <div class="metric-value ${data.performance.final_val_loss < 0.4 ? 'metric-good' :
+                                    data.performance.final_val_loss < 0.6 ? 'metric-medium' : 'metric-bad'}">
+                                    ${data.performance.final_val_loss.toFixed(4)}
+                                </div>
+                                <p>Lower is better</p>
+                            </div>
+                        </div>
+                       `;
+
+                    metricsContainer.innerHTML = html;
+                })
+                .catch(error => {
+                    console.error('Error loading metrics:', error);
+                    metricsContainer.innerHTML = `
+                        <div class="metric-card">
+                            <h3>Error</h3>
+                            <p>Failed to load performance metrics. Please try again later.</p>
+                        </div>
+                    `;
+                });
+        }
+    </script>
+</body>
+</html>
